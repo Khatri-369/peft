@@ -714,3 +714,42 @@ class TestTargetParameters:
         msg = re.escape("Targeting an nn.Parameter on the top-level module is not supported (parameter 'param')")
         with pytest.raises(ValueError, match=msg):
             get_peft_model(MyModule(), config)
+
+    def test_target_parameter_rank_pattern_does_not_warn(self, recwarn):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.zeros(10, 10))
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = SubModule()
+
+        config = LoraConfig(
+            target_modules=[],
+            target_parameters=["sub.weight"],
+            rank_pattern={"sub.weight": 4},
+        )
+        get_peft_model(MyModel(), config)
+        warn_messages = [w.message.args[0] for w in recwarn.list if isinstance(w.message, RuntimeWarning)]
+        assert not any("rank_pattern" in str(msg) and "did not match" in str(msg) for msg in warn_messages)
+
+    def test_target_parameter_unmatched_pattern_still_warns(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.zeros(10, 10))
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = SubModule()
+
+        config = LoraConfig(
+            target_modules=[],
+            target_parameters=["sub.weight"],
+            rank_pattern={"non_existent_param": 4},
+        )
+        with pytest.warns(RuntimeWarning, match="rank_pattern.*did not match any targeted module or parameter"):
+            get_peft_model(MyModel(), config)
